@@ -1,1 +1,49 @@
+name: Validate New Recruit data
 
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate XML and catalogue links
+        shell: python
+        run: |
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = Path('.')
+          gst_files = list(root.glob('*.gst'))
+          cat_files = list(root.glob('*.cat'))
+          if len(gst_files) != 1:
+              raise SystemExit(f'Expected exactly one .gst in repository root, found {len(gst_files)}')
+          if not cat_files:
+              raise SystemExit('Expected at least one .cat in repository root')
+
+          gst = ET.parse(gst_files[0]).getroot()
+          system_id = gst.attrib.get('id')
+          revision = gst.attrib.get('revision')
+          if not system_id:
+              raise SystemExit('Game system is missing id')
+
+          seen_ids = set()
+          for path in gst_files + cat_files:
+              tree = ET.parse(path)
+              r = tree.getroot()
+              for node in r.iter():
+                  node_id = node.attrib.get('id')
+                  if node_id:
+                      key = (path.name, node_id)
+                      if key in seen_ids:
+                          raise SystemExit(f'Duplicate id in {path}: {node_id}')
+                      seen_ids.add(key)
+              if path.suffix == '.cat':
+                  if r.attrib.get('gameSystemId') != system_id:
+                      raise SystemExit(f'{path}: gameSystemId does not match {system_id}')
+                  if r.attrib.get('gameSystemRevision') != revision:
+                      raise SystemExit(f'{path}: gameSystemRevision does not match {revision}')
+
+          print('Validated:', gst_files[0].name, ', '.join(p.name for p in cat_files))
